@@ -1,0 +1,79 @@
+# Study Circle Builder (ML Model)
+# Goal: Recommend study circles based on students' interests, goals, and available time
+
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+import random
+import itertools
+
+# Load dataset (same common dataset assumed)
+df = pd.read_csv('/content/vit_bhopal_students_dataset.csv')
+
+# Helper to create set from text
+def to_set(text):
+    return set(map(str.strip, str(text).split(',')))
+
+# Generate student pairs for compatibility in study circles
+def generate_circle_pairs(df, n_pairs=1000):
+    pairs = []
+    indices = df.index.tolist()
+    while len(pairs) < n_pairs:
+        a, b = random.sample(indices, 2)
+        interests_a, interests_b = to_set(df.loc[a, 'Interests']), to_set(df.loc[b, 'Interests'])
+        goals_a, goals_b = df.loc[a, 'Goals'], df.loc[b, 'Goals']
+        availability_a, availability_b = df.loc[a, 'Availability'], df.loc[b, 'Availability']
+
+        match = int(bool(interests_a & interests_b and goals_a == goals_b and availability_a == availability_b))
+
+        pairs.append((a, b, match))
+    return pairs
+
+# Extract features for each pair
+def extract_circle_features(a, b):
+    interests_a, interests_b = to_set(df.loc[a, 'Interests']), to_set(df.loc[b, 'Interests'])
+    goals_a, goals_b = df.loc[a, 'Goals'], df.loc[b, 'Goals']
+    availability_a, availability_b = df.loc[a, 'Availability'], df.loc[b, 'Availability']
+
+    return [
+        len(interests_a & interests_b),
+        int(goals_a == goals_b),
+        int(availability_a == availability_b)
+    ]
+
+# Create dataset for training
+circle_pairs = generate_circle_pairs(df, 1000)
+X = [extract_circle_features(a, b) for a, b, _ in circle_pairs]
+y = [label for _, _, label in circle_pairs]
+
+# Train/test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Train classifier
+clf = RandomForestClassifier(n_estimators=100, random_state=42)
+clf.fit(X_train, y_train)
+
+# Evaluate model
+y_pred = clf.predict(X_test)
+accuracy = accuracy_score(y_test, y_pred)
+print("Study Circle Builder Accuracy:", accuracy)
+
+# Recommend top circle matches for a student
+def recommend_circle(student_id, top_n=5):
+    idx = df.index[df['Student_ID'] == student_id].tolist()[0]
+    scores = []
+    for other in df.index:
+        if other == idx:
+            continue
+        features = extract_circle_features(idx, other)
+        prob = clf.predict_proba([features])[0][1]
+        scores.append((other, prob))
+    top_matches = sorted(scores, key=lambda x: x[1], reverse=True)[:top_n]
+    return df.loc[[i for i, _ in top_matches]][['Student_ID', 'Interests', 'Goals', 'Availability']]
+
+# Sample test
+sample_id = df['Student_ID'].iloc[0]
+print("Recommended Study Circle Members for:", sample_id)
+print(recommend_circle(sample_id))
